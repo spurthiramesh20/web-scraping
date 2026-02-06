@@ -31,3 +31,10 @@ env/
 *.bin
 *.dat
 *.msgpack
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Qdrant local storage
+qdrant_storage/
