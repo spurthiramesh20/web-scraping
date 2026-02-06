@@ -1,0 +1,33 @@
+.env
+.env.*
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Data files
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.tsv
+*.parquet
+*.arrow
+*.feather
+*.h5
+*.hdf5
+*.jsonl
+*.ndjson
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.dat
+*.msgpack
