@@ -11,7 +11,6 @@ from gemini import get_assistant_response
 load_dotenv()
 st.set_page_config(page_title="Tarento AI", page_icon="🚀", layout="wide")
 
-
 # 2. INITIALIZE DATABASE & EMBEDDING MODEL
 @st.cache_resource
 def initialize_system():
@@ -33,18 +32,21 @@ def search_knowledge_base(query):
         results = client_db.query_points(
             collection_name=COLLECTION_NAME, 
             query=query_vec, 
-            limit=8  # Higher limit helps Gemini see multiple routing options
+            limit=8  
         ).points
         
         # Return unique results with a safety threshold
-        return [{"text": hit.payload.get("text", ""), "url": hit.payload.get("source_url", "")} 
-                for hit in results if hit.score > 0.65]
+        # Added .get("title") so the dynamic link naming works
+        return [{"text": hit.payload.get("text", ""), 
+                 "url": hit.payload.get("source_url", ""),
+                 "title": hit.payload.get("title", "Tarento Page")} 
+                for hit in results if hit.score > 0.30]
     except Exception as e:
-        print(f"Search Error: {e}")
+        st.error(f"Search Error: {e}")
         return []
 
 def get_response_and_link(prompt, context, instructions):
-    # Call Gemini logic
+    # Call Gemini logic from your gemini.py
     full_response = get_assistant_response(prompt, context, instructions)
     
     # Extract URL using Regex looking for "SOURCE_LINK: [URL]"
@@ -70,65 +72,70 @@ def load_system_prompts():
 
 STRICT_INSTRUCTIONS = load_system_prompts()
 
-# 4. CHAT INTERFACE & HISTORY
-st.title("🚀 Tarento AI Assistant")
-
+# --- 4. SESSION STATE INITIALIZATION ---
+# This MUST happen before any .append calls
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display history with persistent buttons
+# --- 5. UI HEADER & SIDEBAR ---
+st.title("🚀 Tarento AI Assistant")
+
+with st.sidebar:
+    st.image("https://www.tarento.com/images/logo.png", width=150) # Use actual logo if you have it
+    if st.button("Clear Chat"):
+        st.session_state.messages = []
+        st.rerun()
+
+# --- 6. DISPLAY CHAT HISTORY ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("link"):
-            # Re-generate the correct label based on the stored link
-            l_val = msg["link"].lower()
-            if "career" in l_val: label = "🎯 View Openings"
-            elif "service" in l_val: label = "🛠️ Explore Services"
-            elif "contact" in l_val: label = "📞 Contact Info"
-            elif "about" in l_val: label = "🏢 About Tarento"
-            else: label = "📖 View Details"
-            
-            st.divider()
-            st.link_button(label, msg["link"], use_container_width=True)
+            st.markdown(f"🔗 [Info about {msg.get('title', 'Tarento')}]({msg['link']})")
 
-# 5. NEW USER INPUT
-if prompt := st.chat_input("Ask about Tarento services, careers, or locations..."):
-    # Add user message to history
+# --- 7. HANDLE NEW INPUT ---
+if prompt := st.chat_input("Ask about Tarento..."):
+    # Store user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Handle simple greetings without calling the DB (Clean Greetings)
-        if prompt.lower().strip() in ["hi", "hello", "hey", "greetings"]:
-            answer = "Hello! I'm the Tarento AI Assistant. How can I help you explore our services, career opportunities, or global offices today?"
-            link = None
-        else:
-            with st.status("Searching Tarento Knowledge...", expanded=False) as status:
-                citations = search_knowledge_base(prompt)
-                # Formulate context for Gemini
-                context_text = "\n".join([f"Data: {c['text']} | Link: {c['url']}" for c in citations])
-                
-                answer, link = get_response_and_link(prompt, context_text, STRICT_INSTRUCTIONS)
-                status.update(label="Ready!", state="complete")
+        answer = ""
+        current_link = None
+        current_title = "Tarento Official"
 
-        st.markdown(answer)
-        
-        # Display the button only if Gemini provided a link
-        if link:
-            l_val = link.lower()
-            if "career" in l_val: label = "🎯 View Openings"
-            elif "service" in l_val: label = "🛠️ Explore Services"
-            elif "contact" in l_val: label = "📞 Contact Info"
-            elif "about" in l_val: label = "🏢 About Tarento"
-            else: label = "📖 View Details"
+        with st.status("Consulting Tarento Records...", expanded=False) as status:
+            # 1. Search Qdrant
+            citations = search_knowledge_base(prompt)
             
-            st.divider()
-            st.link_button(label, link, use_container_width=True)
+            # 2. Prepare Context (even if empty)
+            if citations:
+                context_text = "\n".join([f"Data: {c['text']} | Link: {c['url']}" for c in citations])
+                status.update(label="Information retrieved.", state="complete")
+            else:
+                context_text = "NO_CONTEXT_AVAILABLE"
+                status.update(label="No specific internal documents found.", state="complete")
 
-        # SAVE ASSISTANT MESSAGE & LINK TO HISTORY
+            # 3. Call Gemini
+            answer, current_link = get_response_and_link(prompt, context_text, STRICT_INSTRUCTIONS)
+
+        # 4. Find the title if a link was returned (Matching Qdrant Title to Link)
+        if current_link:
+            for c in citations:
+                if c['url'] == current_link:
+                    # Extracts the first part of the title for cleaner link text
+                    current_title = c.get('title', 'Tarento Official Page').split('|')[0].strip()
+                    break
+
+        # 5. Display the result
+        st.markdown(answer)
+        if current_link:
+            st.markdown(f"🔗 [Info about {current_title}]({current_link})")
+
+        # 6. SAVE TO HISTORY (Persistent for reruns)
         st.session_state.messages.append({
-            "role": "assistant", 
-            "content": answer, 
-            "link": link
+            "role": "assistant",
+            "content": answer,
+            "link": current_link,
+            "title": current_title
         })
